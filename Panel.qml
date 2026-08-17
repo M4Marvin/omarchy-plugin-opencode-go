@@ -18,8 +18,15 @@ Panel {
   readonly property color urgent: bar ? bar.urgent : Color.urgent
   readonly property color dim: Qt.darker(foreground, 1.35)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
-  readonly property bool alarming: Model.behindPace(
-    Model.normalizeWindow(service.account ? service.account.weekly : null, "weekly", nowMs), nowMs)
+  readonly property bool alarming: root.anyBehindPace(service.account)
+  readonly property string usageDisplay: root.normalizedUsageDisplay(root.setting("usageDisplay", "weekly"))
+  readonly property var usageDisplayOptions: [
+    { value: "rolling", label: "5-hour (5h)" },
+    { value: "weekly", label: "Weekly" },
+    { value: "monthly", label: "Monthly" },
+    { value: "all", label: "All three" }
+  ]
+  property bool optionsOpen: false
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -29,14 +36,79 @@ Panel {
     service.refresh()
   }
 
-  function weeklyValue(account) {
-    return account && account.weekly ? Number(account.weekly.percent) / 100 : 0
+  function normalizedUsageDisplay(value) {
+    var candidate = String(value || "weekly")
+    return ["rolling", "weekly", "monthly", "all"].indexOf(candidate) >= 0 ? candidate : "weekly"
   }
 
-  onOpenedChanged: if (opened) {
-    nowMs = Date.now()
-    if (!service.lastUpdated || (Date.now() - service.lastUpdated.getTime()) > service.refreshIntervalSec * 1000) root.refresh()
+  function usageValue(account, kind) {
+    var window = account && account[kind] ? account[kind] : null
+    return window ? Model.percent(Number(window.percent) / 100) : "—"
+  }
+
+  function usageDisplayLabel() {
+    if (root.usageDisplay === "rolling") return "5-hour"
+    if (root.usageDisplay === "monthly") return "Monthly"
+    if (root.usageDisplay === "all") return "All three windows"
+    return "Weekly"
+  }
+
+  function barUsageText(account) {
+    var label = account ? account.label : "Go"
+    if (root.usageDisplay === "all") {
+      return label + " · 5h " + root.usageValue(account, "rolling")
+        + " · W " + root.usageValue(account, "weekly")
+        + " · M " + root.usageValue(account, "monthly")
+    }
+    return label + " · " + root.usageValue(account, root.usageDisplay)
+  }
+
+  function behindPace(account, kind) {
+    return Model.behindPace(
+      Model.normalizeWindow(account ? account[kind] : null, kind, root.nowMs), root.nowMs)
+  }
+
+  function anyBehindPace(account) {
+    if (!account) return false
+    if (root.usageDisplay === "all")
+      return root.behindPace(account, "rolling") || root.behindPace(account, "weekly") || root.behindPace(account, "monthly")
+    return root.behindPace(account, root.usageDisplay)
+  }
+
+  function persistSettings(values) {
+    var entry = { id: root.moduleName }
+    var current = root.settings || ({})
+    for (var existing in current) if (existing !== "id") entry[existing] = current[existing]
+    for (var key in values) entry[key] = values[key]
+
+    root.settings = entry
+    if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
+      root.bar.shell.updateEntryInline(root.moduleName, entry)
+  }
+
+  function setUsageDisplay(value) {
+    var next = root.normalizedUsageDisplay(value)
+    if (next !== root.usageDisplay) root.persistSettings({ usageDisplay: next })
+  }
+
+  function openOptions() {
+    optionsOpen = true
+    Qt.callLater(function() { optionsView.forceActiveFocus() })
+  }
+
+  function closeOptions() {
+    optionsOpen = false
     Qt.callLater(function() { catcher.forceActiveFocus() })
+  }
+
+  onOpenedChanged: {
+    if (opened) {
+      nowMs = Date.now()
+      if (!service.lastUpdated || (Date.now() - service.lastUpdated.getTime()) > service.refreshIntervalSec * 1000) root.refresh()
+      Qt.callLater(function() { catcher.forceActiveFocus() })
+    } else {
+      optionsOpen = false
+    }
   }
 
   Service {
@@ -57,7 +129,7 @@ Panel {
     bar: root.bar
     text: " "
     fixedWidth: vertical ? -1 : content.implicitWidth + Style.space(16)
-    tooltipText: "OpenCode Go usage · click for details"
+    tooltipText: "OpenCode Go usage · " + root.usageDisplayLabel()
     active: root.alarming
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton || buttonCode === Qt.MiddleButton) root.refresh()
@@ -74,7 +146,7 @@ Panel {
         width: Style.space(13)
         height: width
         anchors.verticalCenter: parent.verticalCenter
-        source: Qt.resolvedUrl("opencode-go.svg")
+        source: Qt.resolvedUrl("opencode-go.png")
         sourceSize: Qt.size(26, 26)
         layer.enabled: true
         layer.effect: MultiEffect {
@@ -86,7 +158,7 @@ Panel {
       Text {
         visible: !(bar ? bar.vertical : false)
         anchors.verticalCenter: parent.verticalCenter
-        text: (service.account ? service.account.label : "Go") + " · " + (service.account ? Model.percent(root.weeklyValue(service.account)) : "—")
+        text: root.barUsageText(service.account)
         color: root.alarming ? root.urgent : root.foreground
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
@@ -97,7 +169,7 @@ Panel {
         visible: bar ? bar.vertical : false
         width: parent.width
         anchors.verticalCenter: parent.verticalCenter
-        text: service.account ? Model.percent(root.weeklyValue(service.account)) : "—"
+        text: root.barUsageText(service.account)
         color: root.alarming ? root.urgent : root.foreground
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
@@ -120,8 +192,12 @@ Panel {
     PanelKeyCatcher {
       id: catcher
       anchors.fill: parent
-      onCloseRequested: root.close()
-      onTextKey: function(text) { if (text === "r" || text === "R") root.refresh() }
+      blocked: root.optionsOpen
+      onCloseRequested: root.optionsOpen ? root.closeOptions() : root.close()
+      onTextKey: function(text) {
+        if (!root.optionsOpen && (text === "r" || text === "R")) root.refresh()
+        else if (!root.optionsOpen && (text === "o" || text === "O")) root.openOptions()
+      }
       onTabRequested: function(direction) { root.switchPanel(direction) }
 
       ScrollView {
@@ -151,15 +227,16 @@ Panel {
 
           PanelHero {
             width: parent.width
-            title: "OpenCode Go"
-            meta: service.account ? service.account.label : "Go"
+            title: root.optionsOpen ? "Options" : "OpenCode Go"
+            meta: root.optionsOpen ? "Bar display" : (service.account ? service.account.label : "Go")
+            detail: root.optionsOpen ? "auto-saved" : ""
             foreground: root.foreground
             fontFamily: root.fontFamily
             iconComponent: Component {
               Image {
                 width: Style.font.display
                 height: width
-                source: Qt.resolvedUrl("opencode-go.svg")
+                source: Qt.resolvedUrl("opencode-go.png")
                 sourceSize: Qt.size(48, 48)
                 layer.enabled: true
                 layer.effect: MultiEffect {
@@ -168,10 +245,62 @@ Panel {
                 }
               }
             }
+            trailingControl: Component {
+              PanelActionButton {
+                iconText: root.optionsOpen ? "󰁍" : "󰒓"
+                tooltipText: root.optionsOpen ? "Back to usage" : "Options"
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                onClicked: root.optionsOpen ? root.closeOptions() : root.openOptions()
+              }
+            }
+          }
+
+          Column {
+            id: optionsView
+            visible: root.optionsOpen
+            width: parent.width
+            spacing: Style.space(10)
+            focus: visible
+            Keys.onEscapePressed: root.closeOptions()
+
+            PanelSectionHeader {
+              text: "BAR USAGE"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+
+            Text {
+              width: parent.width
+              text: "Choose one limit window or show all three in the top bar."
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              wrapMode: Text.WordWrap
+            }
+
+            Dropdown {
+              width: parent.width
+              label: "Usage to show"
+              value: root.usageDisplay
+              options: root.usageDisplayOptions
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              onChanged: function(value) { root.setUsageDisplay(value) }
+            }
+
+            Text {
+              width: parent.width
+              text: "Current: " + root.usageDisplayLabel() + ". Changes are saved automatically."
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
           }
 
           Text {
-            visible: service.lastError !== ""
+            visible: !root.optionsOpen && service.lastError !== ""
             width: parent.width
             text: service.lastError
             color: root.urgent
@@ -181,7 +310,7 @@ Panel {
           }
 
           Text {
-            visible: service.refreshing && !service.account
+            visible: !root.optionsOpen && service.refreshing && !service.account
             width: parent.width
             text: "Loading usage…"
             color: root.dim
@@ -189,20 +318,27 @@ Panel {
             font.pixelSize: Style.font.bodySmall
           }
 
-          PanelSeparator { width: parent.width; foreground: root.foreground }
+          PanelSeparator {
+            visible: !root.optionsOpen
+            width: parent.width
+            foreground: root.foreground
+          }
 
           PanelSectionHeader {
+            visible: !root.optionsOpen
             text: "LIMIT WINDOWS"
             foreground: root.foreground
             fontFamily: root.fontFamily
           }
 
           AccountCard {
+            visible: !root.optionsOpen
             width: body.width
             account: service.account
           }
 
           Item {
+            visible: !root.optionsOpen
             width: parent.width
             implicitHeight: Math.max(usageHeader.implicitHeight, usageValue.implicitHeight)
 
@@ -230,6 +366,7 @@ Panel {
           }
 
           Row {
+            visible: !root.optionsOpen
             width: parent.width
             spacing: Style.space(4)
 

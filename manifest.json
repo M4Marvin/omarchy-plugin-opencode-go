@@ -1,1 +1,42 @@
-{"schemaVersion":1,"id":"local.opencode-go","name":"OpenCode Go Usage","version":"1.0.0","author":"OpenCode community","license":"MIT","description":"OpenCode Go usage, account switching, reset countdowns, and token history.","kinds":["bar-widget"],"entryPoints":{"barWidget":"Panel.qml"},"barWidget":{"displayName":"OpenCode Go Usage","description":"OpenCode Go account usage and limits.","category":"AI","aliases":["opencode-go","go-usage","zen"],"allowMultiple":false,"defaultSection":"right","defaults":{"refreshIntervalSec":300},"schema":[{"key":"refreshIntervalSec","type":"integer","label":"Refresh interval (seconds)","min":60,"max":3600,"step":60,"defaultValue":300}]}}
+{
+  "schemaVersion": 1,
+  "id": "local.opencode-go",
+  "name": "OpenCode Go Usage",
+  "version": "1.0.0",
+  "author": "OpenCode community",
+  "license": "MIT",
+  "description": "OpenCode Go usage, account switching, reset countdowns, and token history.",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "Panel.qml" },
+  "barWidget": {
+    "displayName": "OpenCode Go Usage",
+    "description": "OpenCode Go account usage and limits.",
+    "category": "AI",
+    "aliases": ["opencode-go", "go-usage", "zen"],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 300,
+      "usageDisplay": "weekly"
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 60,
+        "max": 3600,
+        "step": 60,
+        "defaultValue": 300
+      },
+      {
+        "key": "usageDisplay",
+        "type": "enum",
+        "label": "Bar usage display",
+        "options": ["rolling", "weekly", "monthly", "all"],
+        "defaultValue": "weekly",
+        "description": "Choose one limit window or show all three in the bar."
+      }
+    ]
+  }
+}

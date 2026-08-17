@@ -16,7 +16,15 @@ The widget reads the active key from `~/.local/share/opencode/auth.json` (`openc
 
 ## Limits and settings
 
-The 5-hour rolling limit is $12, weekly is $30, and monthly is $60. Left click opens details; right/middle click refreshes; press `R` in the panel. The default refresh interval is five minutes and can be changed in the bar widget settings (60–3600 seconds).
+The 5-hour rolling limit is $12, weekly is $30, and monthly is $60. Left click opens details; right/middle click refreshes; press `R` in the panel. Open the options button in the panel to choose whether the bar shows the 5-hour, weekly, monthly, or all three usage windows. The default refresh interval is five minutes and can be changed in the bar widget settings (60–3600 seconds).
+
+## Screenshots
+
+![Bar widget](screenshots/bar.png)
+
+![Usage panel](screenshots/panel.png)
+
+![Options](screenshots/options.png)
 
 ## Removal
 

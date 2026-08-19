@@ -12,7 +12,11 @@ omarchy bar add local.opencode-go --section right
 
 ## Account
 
-The widget reads the active key from `~/.local/share/opencode/auth.json` (`opencode-go` entry) and labels it `Go`.
+The widget reads the active key from the `opencode-go` entry in OpenCode's auth file and labels it `Go`. By default this is `~/.local/share/opencode/auth.json`; set `OPENCODE_AUTH_JSON` to use another file.
+
+## Local usage history
+
+Daily token history is read from OpenCode's SQLite database and only includes assistant messages whose provider is `opencode-go`; usage from the Zen provider (`opencode`) is excluded. The default database is `~/.local/share/opencode/opencode.db`, or `$XDG_DATA_HOME/opencode/opencode.db` when `XDG_DATA_HOME` is set. Set `OPENCODE_DB` to use another database.
 
 ## Limits and settings
 

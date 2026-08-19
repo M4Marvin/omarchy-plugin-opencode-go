@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -uo pipefail
-AUTH_JSON="${OPENCODE_AUTH_JSON:-$HOME/.local/share/opencode/auth.json}"
-URL=https://opencode.ai/zen/go/v1/usage
-DB="$HOME/.local/share/opencode/opencode.db"
+DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+AUTH_JSON="${OPENCODE_AUTH_JSON:-$DATA_HOME/opencode/auth.json}"
+URL="${OPENCODE_USAGE_URL:-https://opencode.ai/zen/go/v1/usage}"
+DB="${OPENCODE_DB:-$DATA_HOME/opencode/opencode.db}"
 
-key=$(jq -r '. ["opencode-go"].key // empty' "$AUTH_JSON" 2>/dev/null || true)
+key=$(jq -r '.["opencode-go"].key // empty' "$AUTH_JSON" 2>/dev/null || true)
 
 collect() {
   local k=$1 out code
@@ -24,7 +25,7 @@ error=''
 cutoff=$(( $(date +%s)*1000-604800000 ))
 recent='[]'
 if [[ -r $DB ]]; then
-  q="SELECT date(time_created/1000,'unixepoch'),SUM(COALESCE(json_extract(data,'\$.tokens.total'),0)),ROUND(SUM(COALESCE(json_extract(data,'\$.cost'),0)),4) FROM message WHERE time_created > $cutoff AND json_extract(data,'\$.providerID')='opencode-go' GROUP BY 1 ORDER BY 1;"
+  q="SELECT date(time_created/1000,'unixepoch'),SUM(COALESCE(json_extract(data,'$.tokens.total'),0)),ROUND(SUM(COALESCE(json_extract(data,'$.cost'),0)),4) FROM message WHERE time_created > $cutoff AND json_valid(data) AND json_extract(data,'$.role')='assistant' AND json_extract(data,'$.providerID')='opencode-go' GROUP BY 1 ORDER BY 1;"
   rows=$(sqlite3 -readonly "file:$DB?mode=ro" "$q" 2>/dev/null || true)
   while IFS='|' read -r d t c; do [[ -n $d ]] && recent=$(jq -c --arg d "$d" --arg t "${t:-0}" --arg c "${c:-0}" '.+[{date:$d,tokens:($t|tonumber),cost:($c|tonumber)}]' <<<"$recent"); done <<<"$rows"
 fi

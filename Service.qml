@@ -14,6 +14,10 @@ Item {
   property string output: ""
   readonly property string collectorScript: decodeURIComponent(String(Qt.resolvedUrl("collector.sh")).replace(/^file:\/\//, ""))
   readonly property int refreshIntervalSec: intSetting("refreshIntervalSec", 300, 60, 3600)
+  readonly property string barWindow: String(setting("barWindow", "Weekly"))
+  property string moduleName: "local.opencode-go"
+  property bool writingSetting: false
+  property string writeError: ""
 
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined
@@ -23,6 +27,16 @@ Item {
     var value = parseInt(String(setting(name, fallback)), 10)
     if (!isFinite(value)) value = fallback
     return Math.max(minimum, Math.min(maximum, value))
+  }
+  function setBarWindow(value) {
+    writeSetting("barWindow", String(value || "Weekly"))
+  }
+  function writeSetting(key, value) {
+    if (writer.running) return
+    writingSetting = true
+    writeError = ""
+    writer.command = ["omarchy", "bar", "set", root.moduleName, key, String(value)]
+    writer.running = true
   }
   function refresh() {
     if (refreshing || collector.running) return
@@ -60,6 +74,19 @@ Item {
       root.recentDays = parsed.data.recentDays
       root.lastError = parsed.data.error
       root.lastUpdated = new Date()
+    }
+  }
+  Process {
+    id: writer
+    command: []
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector { id: writerStderr; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.writingSetting = false
+      if (exitCode !== 0) {
+        var detail = String(writerStderr.text || "").replace(/\s+/g, " ").trim()
+        root.writeError = detail ? detail.slice(0, 160) : ("Could not save setting (exit " + exitCode + ")")
+      }
     }
   }
 }

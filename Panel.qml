@@ -18,6 +18,11 @@ Panel {
   readonly property color urgent: bar ? bar.urgent : Color.urgent
   readonly property color dim: Qt.darker(foreground, 1.35)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
+
+  // The window the `barWindow` setting puts in the bar label, plus the weekly
+  // window that drives the alarm state — weekly is the budget that actually
+  // bites, so it stays the alarm regardless of what the label shows.
+  readonly property var barPick: Model.barWindow(service.account, service.barWindow, nowMs)
   readonly property bool alarming: Model.behindPace(
     Model.normalizeWindow(service.account ? service.account.weekly : null, "weekly", nowMs), nowMs)
 
@@ -29,8 +34,9 @@ Panel {
     service.refresh()
   }
 
-  function weeklyValue(account) {
-    return account && account.weekly ? Number(account.weekly.percent) / 100 : 0
+  function barLabel() {
+    if (!barPick) return "—"
+    return barPick.spec.tag + " · " + Model.percent(barPick.window.percent)
   }
 
   onOpenedChanged: if (opened) {
@@ -42,6 +48,7 @@ Panel {
   Service {
     id: service
     settings: root.settings
+    moduleName: root.moduleName
   }
 
   Timer {
@@ -57,7 +64,10 @@ Panel {
     bar: root.bar
     text: " "
     fixedWidth: vertical ? -1 : content.implicitWidth + Style.space(16)
-    tooltipText: "OpenCode Go usage · click for details"
+    tooltipText: root.barPick
+      ? "OpenCode Go · " + root.barPick.spec.label + " " + Model.percent(root.barPick.window.percent)
+        + " used · " + Model.resetText(root.barPick.window, root.nowMs) + " · click for details"
+      : "OpenCode Go usage · click for details"
     active: root.alarming
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton || buttonCode === Qt.MiddleButton) root.refresh()
@@ -86,7 +96,7 @@ Panel {
       Text {
         visible: !(bar ? bar.vertical : false)
         anchors.verticalCenter: parent.verticalCenter
-        text: (service.account ? service.account.label : "Go") + " · " + (service.account ? Model.percent(root.weeklyValue(service.account)) : "—")
+        text: root.barLabel()
         color: root.alarming ? root.urgent : root.foreground
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
@@ -97,7 +107,7 @@ Panel {
         visible: bar ? bar.vertical : false
         width: parent.width
         anchors.verticalCenter: parent.verticalCenter
-        text: service.account ? Model.percent(root.weeklyValue(service.account)) : "—"
+        text: root.barPick ? Model.percent(root.barPick.window.percent) : "—"
         color: root.alarming ? root.urgent : root.foreground
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
@@ -139,7 +149,7 @@ Panel {
         Column {
           id: body
           width: scroll.availableWidth
-          spacing: Style.space(10)
+          spacing: Style.space(12)
 
           Text {
             width: parent.width
@@ -153,6 +163,7 @@ Panel {
             width: parent.width
             title: "OpenCode Go"
             meta: service.account ? service.account.label : "Go"
+            detail: root.barPick ? root.barPick.spec.tag + " " + Model.percent(root.barPick.window.percent) : ""
             foreground: root.foreground
             fontFamily: root.fontFamily
             iconComponent: Component {
@@ -164,7 +175,7 @@ Panel {
                 layer.enabled: true
                 layer.effect: MultiEffect {
                   colorization: 1
-                  colorizationColor: root.foreground
+                  colorizationColor: root.alarming ? root.urgent : root.foreground
                 }
               }
             }
@@ -192,6 +203,81 @@ Panel {
           PanelSeparator { width: parent.width; foreground: root.foreground }
 
           PanelSectionHeader {
+            text: "BAR PERCENTAGE"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+          }
+
+          Text {
+            width: parent.width
+            text: "Which limit window the bar label reports."
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          Row {
+            width: parent.width
+            spacing: Style.space(4)
+
+            Repeater {
+              model: [
+                { value: "5-hour", label: "5h" },
+                { value: "Weekly", label: "Weekly" },
+                { value: "Monthly", label: "Monthly" },
+                { value: "Highest", label: "Highest" }
+              ]
+
+              delegate: BorderSurface {
+                required property var modelData
+                readonly property bool active: service.barWindow === modelData.value
+                readonly property bool _hot: pickerHover.hovered
+                readonly property var _spec: Border.controlSpec(
+                  active ? "selected" : (_hot ? "hover-cursor" : "normal"), root.foreground, Color.accent)
+
+                width: Math.max(Style.space(52), pickerLabel.implicitWidth + Style.space(20))
+                height: Style.spacing.controlHeight
+                radius: Style.cornerRadius
+                color: Style.controlFill(active, _hot, root.foreground, Color.accent)
+                borderSpec: _spec
+
+                HoverHandler { id: pickerHover }
+
+                Text {
+                  id: pickerLabel
+                  anchors.centerIn: parent
+                  text: modelData.label
+                  color: active
+                    ? Style.selectedStateColor(root.foreground, Color.accent)
+                    : (_hot ? Style.hoverStateColor(root.foreground, Color.accent) : root.foreground)
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: active
+                }
+
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  enabled: !service.writingSetting
+                  onClicked: service.setBarWindow(modelData.value)
+                }
+              }
+            }
+          }
+
+          Text {
+            visible: service.writeError !== ""
+            width: parent.width
+            text: service.writeError
+            color: root.urgent
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
+          }
+
+          PanelSeparator { width: parent.width; foreground: root.foreground }
+
+          PanelSectionHeader {
             text: "LIMIT WINDOWS"
             foreground: root.foreground
             fontFamily: root.fontFamily
@@ -201,6 +287,8 @@ Panel {
             width: body.width
             account: service.account
           }
+
+          PanelSeparator { width: parent.width; foreground: root.foreground }
 
           Item {
             width: parent.width
@@ -218,56 +306,91 @@ Panel {
             Text {
               id: usageValue
               visible: service.recentDays.length > 0
-              text: Model.tokenCount(Model.recentTotal(service.recentDays)) + " TOKENS"
+              text: Model.tokenCount(Model.recentTotal(service.recentDays)) + " tokens · "
+                + Model.money(Model.recentCostTotal(service.recentDays))
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
               font.bold: true
               anchors.right: parent.right
-              anchors.rightMargin: Style.space(6)
               anchors.verticalCenter: parent.verticalCenter
             }
           }
 
+          Text {
+            visible: service.recentDays.length === 0 && !service.refreshing
+            width: parent.width
+            text: "No OpenCode Go messages in the last seven days."
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+
           Row {
+            id: chart
             width: parent.width
             spacing: Style.space(4)
+            readonly property real columnWidth: (width - spacing * Math.max(0, service.recentDays.length - 1))
+              / Math.max(1, service.recentDays.length)
 
             Repeater {
               model: service.recentDays
 
               delegate: Column {
+                id: day
                 required property var modelData
-                width: (body.width - Style.space(24)) / 7
+                readonly property bool today: Model.isToday(modelData, root.nowMs)
+                readonly property real barWidth: Math.min(Style.space(9), chart.columnWidth)
+                width: chart.columnWidth
+                spacing: Style.space(3)
 
                 Text {
                   width: parent.width
-                  text: Model.tokenCount(modelData.tokens)
-                  color: root.dim
+                  text: Model.tokenCount(day.modelData.tokens)
+                  color: day.today ? root.foreground : root.dim
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.caption
                   horizontalAlignment: Text.AlignHCenter
                 }
 
                 Item {
+                  id: plot
                   width: parent.width
-                  height: Style.space(28)
+                  height: Style.space(38)
+
+                  // Baseline, so an idle day still reads as a day rather than
+                  // as a gap in the chart.
+                  Rectangle {
+                    anchors.bottom: parent.bottom
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: day.barWidth
+                    height: Style.spacing.hairline
+                    color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.25)
+                  }
 
                   Rectangle {
                     anchors.bottom: parent.bottom
                     anchors.horizontalCenter: parent.horizontalCenter
-                    width: Style.space(10)
-                    height: parent.height * Model.dayTokens(modelData) / Math.max(1, Model.recentPeak(service.recentDays))
+                    width: day.barWidth
+                    // Floor at a visible sliver so a low-but-nonzero day is not
+                    // rounded away next to a heavy one.
+                    height: Model.dayTokens(day.modelData) <= 0 ? 0 : Math.max(Style.space(3),
+                      plot.height * Model.dayTokens(day.modelData) / Math.max(1, Model.recentPeak(service.recentDays)))
+                    radius: Style.space(2)
                     color: root.foreground
+                    opacity: day.today ? 1 : 0.5
+
+                    Behavior on height { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
                   }
                 }
 
                 Text {
                   width: parent.width
-                  text: Model.dayLabel(modelData.date)
-                  color: root.dim
+                  text: Model.dayLabel(day.modelData.date)
+                  color: day.today ? root.foreground : root.dim
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.caption
+                  font.bold: day.today
                   horizontalAlignment: Text.AlignHCenter
                 }
               }
@@ -281,115 +404,113 @@ Panel {
   component AccountCard: Column {
     id: card
     required property var account
-    readonly property var windows: [
-      { key: "rolling", label: "5h", dollars: 12 },
-      { key: "weekly", label: "Weekly", dollars: 30 },
-      { key: "monthly", label: "Monthly", dollars: 60 }
-    ]
-    spacing: Style.space(6)
-
-    RowLayout {
-      width: parent.width
-
-      Text {
-        Layout.fillWidth: true
-        text: card.account ? card.account.label : "Go"
-        color: root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.subtitle
-        font.bold: true
-        elide: Text.ElideRight
-      }
-    }
+    spacing: Style.space(12)
 
     Repeater {
-      model: card.windows
+      model: Model.WINDOWS
 
       delegate: Column {
         id: windowRow
         required property var modelData
         width: card.width
-        spacing: Style.space(2)
+        spacing: Style.space(4)
         readonly property var w: Model.normalizeWindow(card.account ? card.account[modelData.key] : null, modelData.key, root.nowMs)
+        readonly property bool behind: Model.behindPace(windowRow.w, root.nowMs)
 
         RowLayout {
           width: parent.width
+          spacing: Style.space(6)
 
           Text {
-            Layout.preferredWidth: Style.space(58)
             text: modelData.label
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
+            font.bold: true
+            font.letterSpacing: 0.6
           }
 
           Item { Layout.fillWidth: true }
 
           Text {
-            Layout.fillWidth: true
-            text: windowRow.w
-              ? Model.percent(windowRow.w.percent) + " · $" + (windowRow.w.limitDollars || modelData.dollars)
-              : (card.account && card.account.status && card.account.status !== "ok" ? card.account.status : "—")
-            color: root.dim
+            text: windowRow.w ? Model.percent(windowRow.w.percent) : "—"
+            color: windowRow.behind ? root.urgent : root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             font.bold: true
-            horizontalAlignment: Text.AlignRight
             elide: Text.ElideRight
           }
-        }
 
-        Rectangle {
-          width: parent.width
-          height: Style.space(5)
-          radius: height / 2
-          color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.22)
-
-          Rectangle {
-            width: parent.width * (windowRow.w ? windowRow.w.percent : 0)
-            height: parent.height
-            radius: parent.radius
-            color: modelData.key === "weekly" && Model.behindPace(windowRow.w, root.nowMs) ? root.urgent : root.foreground
-
-            Behavior on width { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
-            Behavior on color { ColorAnimation { duration: 60 } }
+          Text {
+            visible: !!windowRow.w
+            text: "of $" + (windowRow.w && windowRow.w.limitDollars ? windowRow.w.limitDollars : modelData.dollars)
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
           }
         }
 
-        Text {
-          visible: !!windowRow.w
+        // Padded so the pace marker can overhang the track without clipping.
+        Item {
           width: parent.width
-          text: windowRow.w ? "resets " + Model.countdown(windowRow.w.resetMs, root.nowMs) : ""
-          color: root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
+          height: Style.space(11)
+
+          Rectangle {
+            id: track
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width
+            height: Style.space(5)
+            radius: height / 2
+            color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.18)
+
+            Rectangle {
+              width: parent.width * (windowRow.w ? windowRow.w.percent : 0)
+              height: parent.height
+              radius: parent.radius
+              color: windowRow.behind ? root.urgent : root.foreground
+
+              Behavior on width { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
+              Behavior on color { ColorAnimation { duration: 60 } }
+            }
+          }
+
+          // Where an even spender would be right now: left of the marker is
+          // ahead of pace, right of it is behind.
+          Rectangle {
+            readonly property real position: windowRow.w ? Model.expectedUsed(windowRow.w, root.nowMs) : 0
+            visible: !!windowRow.w && windowRow.w.resetMs > 0 && position > 0.01 && position < 0.99
+            x: Math.round(track.width * position) - width / 2
+            width: Math.max(1, Style.space(2))
+            height: parent.height
+            radius: width / 2
+            color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.55)
+
+            Behavior on x { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
+          }
+        }
+
+        RowLayout {
+          width: parent.width
+          visible: !!windowRow.w
+          spacing: Style.space(6)
+
+          Text {
+            Layout.fillWidth: true
+            text: windowRow.w ? Model.resetText(windowRow.w, root.nowMs) : ""
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+          }
+
+          Text {
+            text: windowRow.w ? Model.paceText(windowRow.w, root.nowMs) : ""
+            color: windowRow.behind ? root.urgent : root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
         }
       }
     }
-
-    RowLayout {
-      id: paceRow
-      width: card.width
-      visible: !!paceRow.weekly && paceRow.weekly.resetMs > 0
-      readonly property var weekly: Model.normalizeWindow(card.account ? card.account.weekly : null, "weekly", root.nowMs)
-
-      Text {
-        Layout.fillWidth: true
-        text: paceRow.weekly ? Model.paceText(paceRow.weekly, root.nowMs) : ""
-        color: Model.behindPace(paceRow.weekly, root.nowMs) ? root.urgent : root.dim
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-      }
-
-      Text {
-        visible: !!paceRow.weekly
-        text: paceRow.weekly ? "Expected " + Model.percent(1 - Model.expectedRemaining(paceRow.weekly, root.nowMs)) + " used" : ""
-        color: root.dim
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-      }
-    }
-
-    PanelSeparator { width: parent.width; foreground: root.foreground }
   }
 }

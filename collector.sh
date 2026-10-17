@@ -29,4 +29,17 @@ if [[ -r $DB ]]; then
   while IFS='|' read -r d t c; do [[ -n $d ]] && recent=$(jq -c --arg d "$d" --arg t "${t:-0}" --arg c "${c:-0}" '.+[{date:$d,tokens:($t|tonumber),cost:($c|tonumber)}]' <<<"$recent"); done <<<"$rows"
 fi
 
+# Fill zero-usage days so the chart shows a continuous week
+filled='[]'
+for i in 6 5 4 3 2 1 0; do
+  d=$(date -d "today -$i day" +%F)
+  entry=$(jq -c --arg d "$d" '.[] | select(.date==$d)' <<<"$recent")
+  if [[ -n $entry ]]; then
+    filled=$(jq -c --argjson e "$entry" '.+[$e]' <<<"$filled")
+  else
+    filled=$(jq -c --arg d "$d" '.+[{date:$d,tokens:0,cost:0}]' <<<"$filled")
+  fi
+done
+recent="$filled"
+
 jq -cn --arg label "Go" --argjson w "$windows" --argjson recent "$recent" --arg status "$status" --arg error "$error" '{label:$label,status:$status,rolling:$w.rolling,weekly:$w.weekly,monthly:$w.monthly,recentDays:$recent,updatedAt:(now|todateiso8601),error:$error}'
